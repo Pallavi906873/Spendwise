@@ -136,7 +136,7 @@ describe('SpendWise API', () => {
         .set('Authorization', `Bearer ${token}`)
 
       expect(res.status).toBe(200)
-      expect(res.body.message).toBe('Expense deleted')
+      expect(res.body.message).toBe('Expense deleted successfully')
     })
   })
 })
