@@ -1,5 +1,5 @@
 'use client'
-import React,{ useEffect, useState } from 'react'
+import React,{ useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function HomePage() {
@@ -20,34 +20,37 @@ export default function HomePage() {
   const token = typeof window!== 'undefined'? localStorage.getItem('token') : null
   const API = 'http://localhost:3000'
 
-  useEffect(() => {
-    if(!token) router.push('/login')
-    else {
-      fetchCategories()
-      fetchExpenses()
-    }
-  }, [search, filterCat])
-
-  const fetchCategories = async () => {
-    const res = await fetch(`${API}/categories`)
-    const data = await res.json()
-    setCategories(data)
-    if(data.length > 0 &&!category) setCategory(data[0].name)
+ useEffect(() => {
+  if (!token) {
+    router.push('/login')
+  } else {
+    fetchCategories()
+    fetchExpenses()
   }
+}, [token, router, fetchCategories, fetchExpenses])
 
-  const fetchExpenses = async () => {
-    setLoading(true)
-    let url = `${API}/expenses`
-    const params = []
-    if(search) params.push(`search=${search}`)
-    if(filterCat) params.push(`category=${filterCat}`)
-    if(params.length) url += '?' + params.join('&')
+ const fetchCategories = useCallback(async () => {
+  const res = await fetch(`${API}/categories`)
+  const data = await res.json()
+  setCategories(data)
+  if(data.length > 0 && !category) setCategory(data[0].name)
+}, [category])
 
-    const res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-    const data = await res.json()
-    setExpenses(data)
-    setLoading(false)
-  }
+ const fetchExpenses = useCallback(async () => {
+  setLoading(true)
+  let url = `${API}/expenses`
+  const params = []
+  if(search) params.push(`search=${search}`)
+  if(filterCat) params.push(`category=${filterCat}`)
+  if(params.length) url += '?' + params.join('&')
+
+  const res = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${token}` }
+  })
+  const data = await res.json()
+  setExpenses(data)
+  setLoading(false)
+}, [search, filterCat, token])
 
   const handleSave = async () => {
     setError('')
