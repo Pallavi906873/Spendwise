@@ -1,178 +1,680 @@
 'use client'
-import React,{ useCallback, useEffect, useState } from 'react'
+
+import React, { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 export default function HomePage() {
   const [expenses, setExpenses] = useState([])
   const [categories, setCategories] = useState([])
+
   const [title, setTitle] = useState('')
   const [amount, setAmount] = useState('')
-  const [category, setCategory] = useState('') // CHANGED: use category name not ID
+  const [category, setCategory] = useState('')
   const [description, setDescription] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(
+    new Date().toISOString().split('T')[0]
+  )
+
   const [editingId, setEditingId] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+
   const [search, setSearch] = useState('')
   const [filterCat, setFilterCat] = useState('')
+
   const router = useRouter()
 
-  const token = typeof window!== 'undefined'? localStorage.getItem('token') : null
+  const token =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('token')
+      : null
+
   const API = 'http://localhost:3000'
 
- useEffect(() => {
-  if (!token) {
-    router.push('/login')
-  } else {
+  // ================= FETCH CATEGORIES =================
+
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/categories`)
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch categories')
+      }
+
+      const data = await res.json()
+
+      setCategories(data)
+
+      if (data.length > 0 && !category) {
+        setCategory(data[0].name)
+      }
+    } catch (err) {
+      console.error('Category error:', err)
+      setError('Failed to load categories')
+    }
+  }, [category])
+
+  // ================= FETCH EXPENSES =================
+
+  const fetchExpenses = useCallback(async () => {
+    try {
+      setLoading(true)
+
+      let url = `${API}/expenses`
+
+      const params = []
+
+      if (search) {
+        params.push(`search=${encodeURIComponent(search)}`)
+      }
+
+      if (filterCat) {
+        params.push(`category=${encodeURIComponent(filterCat)}`)
+      }
+
+      if (params.length > 0) {
+        url += '?' + params.join('&')
+      }
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        throw new Error('Failed to fetch expenses')
+      }
+
+      const data = await res.json()
+
+      setExpenses(data)
+    } catch (err) {
+      console.error('Expense error:', err)
+      setError('Failed to load expenses')
+    } finally {
+      setLoading(false)
+    }
+  }, [search, filterCat, token])
+
+  // ================= AUTH + INITIAL LOAD =================
+
+  useEffect(() => {
+    if (!token) {
+      router.push('/login')
+      return
+    }
+
     fetchCategories()
     fetchExpenses()
-  }
-}, [token, router, fetchCategories, fetchExpenses])
+  }, [token, router, fetchCategories, fetchExpenses])
 
- const fetchCategories = useCallback(async () => {
-  const res = await fetch(`${API}/categories`)
-  const data = await res.json()
-  setCategories(data)
-  if(data.length > 0 && !category) setCategory(data[0].name)
-}, [category])
-
- const fetchExpenses = useCallback(async () => {
-  setLoading(true)
-  let url = `${API}/expenses`
-  const params = []
-  if(search) params.push(`search=${search}`)
-  if(filterCat) params.push(`category=${filterCat}`)
-  if(params.length) url += '?' + params.join('&')
-
-  const res = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${token}` }
-  })
-  const data = await res.json()
-  setExpenses(data)
-  setLoading(false)
-}, [search, filterCat, token])
+  // ================= SAVE EXPENSE =================
 
   const handleSave = async () => {
     setError('')
-    if(!title) return setError("Title is required")
-    if(!amount || amount <= 0) return setError("Valid amount is required")
 
-    const body = { title, amount: Number(amount), category, description, date }
-    const method = editingId? 'PUT' : 'POST'
-    const url = editingId? `${API}/expenses/${editingId}` : `${API}/expenses`
-    const res = await fetch(url, {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify(body)
-    })
-
-    if(!res.ok){
-      const err = await res.json()
-      setError(err.error || "Something went wrong")
+    if (!title.trim()) {
+      setError('Title is required')
       return
     }
-    resetForm()
-    fetchExpenses()
+
+    if (!amount || Number(amount) <= 0) {
+      setError('Valid amount is required')
+      return
+    }
+
+    if (!category) {
+      setError('Category is required')
+      return
+    }
+
+    const body = {
+      title: title.trim(),
+      amount: Number(amount),
+      category,
+      description: description.trim(),
+      date,
+    }
+
+    const method = editingId ? 'PUT' : 'POST'
+
+    const url = editingId
+      ? `${API}/expenses/${editingId}`
+      : `${API}/expenses`
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      })
+
+      if (!res.ok) {
+        const err = await res.json()
+        setError(err.error || 'Something went wrong')
+        return
+      }
+
+      resetForm()
+
+      await fetchExpenses()
+    } catch (err) {
+      console.error('Save error:', err)
+      setError('Unable to save expense')
+    }
   }
 
-  const handleEdit = (e) => {
-    setEditingId(e._id)
-    setTitle(e.title)
-    setAmount(e.amount)
-    setCategory(e.category)
-    setDescription(e.description || '')
-    setDate(e.date? e.date.split('T')[0] : new Date().toISOString().split('T')[0])
+  // ================= EDIT EXPENSE =================
+
+  const handleEdit = (expense) => {
+    setEditingId(expense._id)
+
+    setTitle(expense.title)
+    setAmount(expense.amount)
+    setCategory(expense.category)
+    setDescription(expense.description || '')
+
+    setDate(
+      expense.date
+        ? expense.date.split('T')[0]
+        : new Date().toISOString().split('T')[0]
+    )
+
+    setError('')
   }
+
+  // ================= DELETE EXPENSE =================
 
   const handleDelete = async (id) => {
-    if(!confirm("Delete this expense?")) return
-    await fetch(`${API}/expenses/${id}`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    fetchExpenses()
+    if (!confirm('Delete this expense?')) {
+      return
+    }
+
+    try {
+      const res = await fetch(`${API}/expenses/${id}`, {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+
+      if (!res.ok) {
+        throw new Error('Delete failed')
+      }
+
+      await fetchExpenses()
+    } catch (err) {
+      console.error('Delete error:', err)
+      setError('Unable to delete expense')
+    }
   }
+
+  // ================= RESET FORM =================
 
   const resetForm = () => {
     setEditingId(null)
+
     setTitle('')
     setAmount('')
     setCategory(categories[0]?.name || '')
     setDescription('')
+
     setDate(new Date().toISOString().split('T')[0])
+
     setError('')
   }
 
-  const logout = () => { localStorage.removeItem('token'); router.push('/login') }
-  const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0)
+  // ================= LOGOUT =================
+
+  const logout = () => {
+    localStorage.removeItem('token')
+    router.push('/login')
+  }
+
+  // ================= TOTAL =================
+
+  const total = expenses.reduce(
+    (sum, expense) => sum + Number(expense.amount),
+    0
+  )
+
+  // ================= UI =================
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 p-6">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex justify-between items-center mb-8">
-          <h1 className="text-4xl font-bold text-gray-800">SpendWise 💰</h1>
-          <button onClick={logout} className="bg-red-500 hover:bg-red-600 text-white px-5 py-2 rounded-lg font-semibold shadow">Logout</button>
+    <main
+      style={{
+        minHeight: '100vh',
+        padding: '30px',
+        background: '#f5f7fb',
+      }}
+    >
+      {/* ================= HEADER ================= */}
+
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '30px',
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              margin: 0,
+              fontSize: '32px',
+              fontWeight: '700',
+            }}
+          >
+            SpendWise
+          </h1>
+
+          <p
+            style={{
+              marginTop: '5px',
+              color: '#666',
+            }}
+          >
+            Expense Dashboard
+          </p>
         </div>
 
-        <div className="bg-white p-4 rounded-2xl shadow-lg mb-6 flex gap-3">
-          <input placeholder="Search expenses..." className="border-2 p-2 rounded-lg flex-1" value={search} onChange={e => setSearch(e.target.value)}/>
-          <select className="border-2 p-2 rounded-lg" value={filterCat} onChange={e => setFilterCat(e.target.value)}>
-            <option value="">All Categories</option>
-            {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-          </select>
+        <button
+          onClick={logout}
+          style={{
+            padding: '10px 18px',
+            border: 'none',
+            borderRadius: '8px',
+            background: '#dc3545',
+            color: 'white',
+            cursor: 'pointer',
+            fontWeight: '600',
+          }}
+        >
+          Logout
+        </button>
+      </div>
+
+      {/* ================= SUMMARY ================= */}
+
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '20px',
+          marginBottom: '30px',
+        }}
+      >
+        <div
+          style={{
+            background: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          }}
+        >
+          <p style={{ margin: 0, color: '#777' }}>
+            Total Expenses
+          </p>
+
+          <h2 style={{ marginTop: '10px' }}>
+            ₹{total.toFixed(2)}
+          </h2>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-6 mb-6">
-          <div className="bg-white p-6 rounded-2xl shadow-lg"><p className="text-gray-500">Total Spent</p><p className="text-3xl font-bold text-indigo-600">₹{total}</p></div>
-          <div className="bg-white p-6 rounded-2xl shadow-lg"><p className="text-gray-500">Total Items</p><p className="text-3xl font-bold text-indigo-600">{expenses.length}</p></div>
-          <div className="bg-white p-6 rounded-2xl shadow-lg"><p className="text-gray-500">This Month</p><p className="text-3xl font-bold text-indigo-600">₹{total}</p></div>
-        </div>
+        <div
+          style={{
+            background: 'white',
+            padding: '20px',
+            borderRadius: '12px',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+          }}
+        >
+          <p style={{ margin: 0, color: '#777' }}>
+            Number of Expenses
+          </p>
 
-        <div className="bg-white p-6 rounded-2xl shadow-lg mb-6">
-          <h2 className="text-2xl font-semibold mb-4">{editingId? '✏️ Edit Expense' : '➕ Add New Expense'}</h2>
-          {error && <p className="bg-red-100 text-red-700 p-2 rounded mb-3">{error}</p>}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            <input className="border-2 p-3 rounded-lg" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)}/>
-            <input className="border-2 p-3 rounded-lg" placeholder="Amount ₹" type="number" value={amount} onChange={e => setAmount(e.target.value)}/>
-            <input className="border-2 p-3 rounded-lg" type="date" value={date} onChange={e => setDate(e.target.value)}/>
-            <select className="border-2 p-3 rounded-lg" value={category} onChange={e => setCategory(e.target.value)}>
-              {categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
-            </select>
-            <input className="border-2 p-3 rounded-lg md:col-span-2" placeholder="Description - Optional" value={description} onChange={e => setDescription(e.target.value)}/>
-          </div>
-          <div className="flex gap-3">
-            <button onClick={handleSave} className="bg-indigo-600 hover:bg-indigo-700 text-white px-6 py-3 rounded-lg font-semibold shadow">{editingId? 'Update' : 'Add Expense'}</button>
-            {editingId && <button onClick={resetForm} className="bg-gray-400 hover:bg-gray-500 text-white px-6 py-3 rounded-lg font-semibold">Cancel</button>}
-          </div>
-        </div>
-
-        <div className="bg-white p-6 rounded-2xl shadow-lg">
-          <h2 className="text-2xl font-semibold mb-4">Your Expenses</h2>
-          {loading? <p>Loading...</p> : expenses.length === 0?
-            <div className="text-center py-10 text-gray-400">No expenses yet. Add your first one! 🎉</div> :
-            <div className="space-y-3">
-              {expenses.map(e => (
-                <div key={e._id} className="border p-4 rounded-xl flex justify-between items-center hover:shadow-md transition">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-1">
-                      <p className="font-bold text-lg">{e.title}</p>
-                      <span className="text-xs px-3 py-1 rounded-full font-semibold bg-gray-100">{e.category}</span>
-                    </div>
-                    <p className="text-gray-600 text-sm">₹{e.amount} • {new Date(e.date).toLocaleDateString('en-IN')} • {e.description || 'No description'}</p>
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => handleEdit(e)} className="bg-yellow-500 hover:bg-yellow-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">Edit</button>
-                    <button onClick={() => handleDelete(e._id)} className="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-semibold">Delete</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          }
+          <h2 style={{ marginTop: '10px' }}>
+            {expenses.length}
+          </h2>
         </div>
       </div>
-    </div>
+
+      {/* ================= ERROR ================= */}
+
+      {error && (
+        <div
+          style={{
+            background: '#ffe5e5',
+            color: '#b00020',
+            padding: '12px',
+            borderRadius: '8px',
+            marginBottom: '20px',
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      {/* ================= ADD / EDIT FORM ================= */}
+
+      <section
+        style={{
+          background: 'white',
+          padding: '25px',
+          borderRadius: '12px',
+          marginBottom: '30px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        }}
+      >
+        <h2>
+          {editingId ? 'Edit Expense' : 'Add Expense'}
+        </h2>
+
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit, minmax(200px, 1fr))',
+            gap: '15px',
+            marginTop: '20px',
+          }}
+        >
+          {/* TITLE */}
+
+          <input
+            type="text"
+            placeholder="Title"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            style={inputStyle}
+          />
+
+          {/* AMOUNT */}
+
+          <input
+            type="number"
+            placeholder="Amount"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            style={inputStyle}
+          />
+
+          {/* CATEGORY */}
+
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            style={inputStyle}
+          >
+            <option value="">
+              Select Category
+            </option>
+
+            {categories.map((cat) => (
+              <option
+                key={cat._id || cat.id || cat.name}
+                value={cat.name}
+              >
+                {cat.name}
+              </option>
+            ))}
+          </select>
+
+          {/* DATE */}
+
+          <input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            style={inputStyle}
+          />
+
+          {/* DESCRIPTION */}
+
+          <input
+            type="text"
+            placeholder="Description"
+            value={description}
+            onChange={(e) =>
+              setDescription(e.target.value)
+            }
+            style={inputStyle}
+          />
+        </div>
+
+        <div
+          style={{
+            marginTop: '20px',
+            display: 'flex',
+            gap: '10px',
+          }}
+        >
+          <button
+            onClick={handleSave}
+            style={{
+              padding: '11px 20px',
+              border: 'none',
+              borderRadius: '8px',
+              background: '#198754',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: '600',
+            }}
+          >
+            {editingId ? 'Update Expense' : 'Add Expense'}
+          </button>
+
+          {editingId && (
+            <button
+              onClick={resetForm}
+              style={{
+                padding: '11px 20px',
+                border: 'none',
+                borderRadius: '8px',
+                background: '#6c757d',
+                color: 'white',
+                cursor: 'pointer',
+              }}
+            >
+              Cancel
+            </button>
+          )}
+        </div>
+      </section>
+
+      {/* ================= SEARCH / FILTER ================= */}
+
+      <section
+        style={{
+          background: 'white',
+          padding: '20px',
+          borderRadius: '12px',
+          marginBottom: '20px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns:
+              'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '15px',
+          }}
+        >
+          <input
+            type="text"
+            placeholder="Search expenses..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={inputStyle}
+          />
+
+          <select
+            value={filterCat}
+            onChange={(e) =>
+              setFilterCat(e.target.value)
+            }
+            style={inputStyle}
+          >
+            <option value="">
+              All Categories
+            </option>
+
+            {categories.map((cat) => (
+              <option
+                key={cat._id || cat.id || cat.name}
+                value={cat.name}
+              >
+                {cat.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </section>
+
+      {/* ================= EXPENSE LIST ================= */}
+
+      <section
+        style={{
+          background: 'white',
+          padding: '25px',
+          borderRadius: '12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+        }}
+      >
+        <h2>Expenses</h2>
+
+        {loading ? (
+          <p>Loading expenses...</p>
+        ) : expenses.length === 0 ? (
+          <p style={{ color: '#777' }}>
+            No expenses found.
+          </p>
+        ) : (
+          <div
+            style={{
+              overflowX: 'auto',
+              marginTop: '20px',
+            }}
+          >
+            <table
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+              }}
+            >
+              <thead>
+                <tr>
+                  <th style={thStyle}>Title</th>
+                  <th style={thStyle}>Amount</th>
+                  <th style={thStyle}>Category</th>
+                  <th style={thStyle}>Description</th>
+                  <th style={thStyle}>Date</th>
+                  <th style={thStyle}>Actions</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {expenses.map((expense) => (
+                  <tr key={expense._id}>
+                    <td style={tdStyle}>
+                      {expense.title}
+                    </td>
+
+                    <td style={tdStyle}>
+                      ₹{Number(expense.amount).toFixed(2)}
+                    </td>
+
+                    <td style={tdStyle}>
+                      {expense.category}
+                    </td>
+
+                    <td style={tdStyle}>
+                      {expense.description || '-'}
+                    </td>
+
+                    <td style={tdStyle}>
+                      {expense.date
+                        ? new Date(
+                            expense.date
+                          ).toLocaleDateString()
+                        : '-'}
+                    </td>
+
+                    <td style={tdStyle}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          gap: '8px',
+                        }}
+                      >
+                        <button
+                          onClick={() =>
+                            handleEdit(expense)
+                          }
+                          style={{
+                            padding: '7px 12px',
+                            border: 'none',
+                            borderRadius: '6px',
+                            background: '#0d6efd',
+                            color: 'white',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            handleDelete(expense._id)
+                          }
+                          style={{
+                            padding: '7px 12px',
+                            border: 'none',
+                            borderRadius: '6px',
+                            background: '#dc3545',
+                            color: 'white',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </main>
   )
+}
+
+// ================= STYLES =================
+
+const inputStyle = {
+  width: '100%',
+  padding: '11px',
+  border: '1px solid #ccc',
+  borderRadius: '8px',
+  fontSize: '14px',
+  boxSizing: 'border-box',
+}
+
+const thStyle = {
+  textAlign: 'left',
+  padding: '12px',
+  borderBottom: '1px solid #ddd',
+}
+
+const tdStyle = {
+  padding: '12px',
+  borderBottom: '1px solid #eee',
 }
